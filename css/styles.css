@@ -78,6 +78,10 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
   grid-template-columns:var(--rail-w) var(--thumb-w) 1fr var(--ctx-w);
   height:calc(100% - var(--topbar-h));
 }
+.rail{grid-column:1;}
+.thumb-rail{grid-column:2;}
+.viewport{grid-column:3;}
+.context-panel{grid-column:4;}
 .app-body.thumbs-collapsed{grid-template-columns:var(--rail-w) 0 1fr var(--ctx-w);}
 .app-body.ctx-collapsed{grid-template-columns:var(--rail-w) var(--thumb-w) 1fr 0;}
 
