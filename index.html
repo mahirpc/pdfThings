@@ -172,7 +172,23 @@
 <!-- ============ LIBRARIES ============ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.7/Sortable.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib-plus-encrypt@1.1.0/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib-plus-encrypt@1.1.0/dist/pdf-lib-plus-encrypt.iife.js"></script>
+<script>
+  (function () {
+    var missing = [];
+    if (typeof window.pdfjsLib === 'undefined') missing.push('pdf.js');
+    if (typeof window.PDFLib === 'undefined') missing.push('pdf-lib');
+    if (typeof window.Sortable === 'undefined') missing.push('Sortable');
+    if (!missing.length) return;
+    var banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0e1116;color:#e9e8e2;' +
+      'display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif;text-align:center;';
+    banner.innerHTML = '<div style="max-width:380px;"><h1 style="font-size:18px;margin-bottom:10px;">Couldn\'t load ' + missing.join(', ') +
+      '</h1><p style="color:#8b93a3;font-size:14px;line-height:1.6;">This usually means the connection dropped mid-load, or a network/ad-blocker is stopping requests to cdnjs.cloudflare.com or cdn.jsdelivr.net. Check your connection and reload.</p>' +
+      '<button onclick="location.reload()" style="margin-top:16px;background:#1b7a72;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:14px;cursor:pointer;">Reload</button></div>';
+    document.body.appendChild(banner);
+  })();
+</script>
 
 <!-- ============ APP ============ -->
 <script src="js/db.js"></script>
