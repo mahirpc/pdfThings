@@ -7,7 +7,7 @@
  * here — it's several MB and most sessions never touch OCR, so it's
  * fetched (and then opportunistically cached) only when first used.
  */
-const CACHE_VERSION = 'pdfthings-v1';
+const CACHE_VERSION = 'pdfthings-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -81,8 +81,14 @@ self.addEventListener('fetch', (event) => {
       const hit = await cache.match(req);
       if (hit) return hit;
       try {
-        const res = await fetch(req, { mode: 'cors' });
-        if (res.ok) cache.put(req, res.clone());
+        // Don't override the request's mode — a plain <script src> without
+        // a crossorigin attribute is issued as 'no-cors' by the browser,
+        // and forcing 'cors' here could fetch something the browser
+        // itself wouldn't have accepted the same way.
+        const res = await fetch(req);
+        // opaque (no-cors) responses read .ok === false even on success —
+        // still cache them, just don't try to inspect their status.
+        if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());
         return res;
       } catch (e) {
         return hit || Response.error();

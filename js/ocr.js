@@ -10,7 +10,7 @@
   async function ensureWorker(onProgress) {
     if (worker) return worker;
     if (!window.Tesseract) {
-      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+      await loadScriptWithRetry('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js', 3);
     }
     worker = await Tesseract.createWorker('eng', 1, {
       logger: (m) => onProgress && onProgress(m),
@@ -21,9 +21,18 @@
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Could not load OCR engine (offline?)'));
+      s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('load-failed'));
       document.head.appendChild(s);
     });
+  }
+
+  async function loadScriptWithRetry(src, attempts) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try { await loadScript(src + (i > 0 ? '?retry=' + i : '')); return; }
+      catch (e) { lastErr = e; await new Promise((r) => setTimeout(r, 600 * (i + 1))); }
+    }
+    throw new Error('Could not reach the OCR engine after ' + attempts + ' tries. Check your connection and try again.');
   }
 
   async function renderPageToCanvas(pageIndex, scale) {

@@ -57,6 +57,11 @@
 }
 
 *{box-sizing:border-box;}
+/* The native `hidden` attribute only wins over the UA stylesheet at equal
+   specificity. Any class rule that sets its own `display` (e.g. our
+   .empty-state{display:flex}) silently out-cascades it, so an element can
+   carry hidden="true" and still render. Force it explicitly, everywhere. */
+[hidden]{display:none !important;}
 html,body{height:100%;}
 body{
   margin:0;
@@ -174,12 +179,14 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 .viewport{position:relative;background:var(--content-bg);overflow:auto;transition:background .15s;}
 .page-scroller{padding:32px 0 120px;display:flex;flex-direction:column;align-items:center;gap:28px;}
 .page-block{position:relative;background:#fff;box-shadow:var(--content-shadow);}
+.page-block.current-page{box-shadow:0 0 0 3px var(--teal-500), var(--content-shadow);}
+.page-label{font-family:var(--font-mono);font-size:11px;color:var(--content-muted);text-align:center;margin-top:-14px;transition:color .15s;}
+.page-block.current-page ~ .page-label{color:var(--teal-500);}
 .page-block canvas.base-canvas{display:block;position:absolute;inset:0;}
-.page-block canvas.overlay-canvas{position:absolute;inset:0;touch-action:none;}
+.page-block canvas.overlay-canvas{position:absolute;inset:0;}
 .page-block .text-layer{position:absolute;inset:0;overflow:hidden;line-height:1;opacity:.001;}
 .page-block .text-layer span{position:absolute;white-space:pre;transform-origin:0 0;cursor:text;}
 .page-block .text-layer ::selection{background:rgba(27,122,114,.4);}
-.page-label{font-family:var(--font-mono);font-size:11px;color:var(--content-muted);text-align:center;margin-top:-14px;}
 
 /* empty state */
 .empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:40px;padding:24px;overflow:auto;}

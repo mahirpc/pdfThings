@@ -79,6 +79,7 @@
   function registerSurface(pageIndex, overlayCanvas, viewport, textLayerEl) {
     surfaces[pageIndex] = { overlayCanvas, viewport, textLayerEl };
     attachPointerHandlers(pageIndex);
+    updateInteractivity();
     redraw(pageIndex);
   }
   function unregisterSurface(pageIndex) {
@@ -254,6 +255,18 @@
 
   /* -------------------- interaction -------------------- */
 
+  /** Whether the overlay canvas should intercept pointer events at all.
+   *  highlight/underline/strike work by selecting real text in the layer
+   *  underneath, so the overlay must get out of the way entirely for
+   *  those — otherwise, being on top, it would swallow every touch/click
+   *  before the text layer ever saw it (and also block native scrolling). */
+  function updateInteractivity() {
+    const passThrough = ['highlight', 'underline', 'strike'].includes(state.tool);
+    Object.values(surfaces).forEach((s) => {
+      if (s.overlayCanvas) s.overlayCanvas.style.pointerEvents = passThrough ? 'none' : 'auto';
+    });
+  }
+
   function attachPointerHandlers(pageIndex) {
     const surf = surfaces[pageIndex];
     const canvas = surf.overlayCanvas;
@@ -271,17 +284,18 @@
 
     canvas.addEventListener('pointerdown', (evt) => {
       const p = toPage(evt);
-      canvas.setPointerCapture(evt.pointerId);
 
       if (state.stampArm) {
-        placeStamp(pageIndex, p);
+        placeStamp(pageIndex, p); // single tap to place — no drag, no capture needed
         return;
       }
       if (state.tool === 'select') {
         const hit = hitTest(pageIndex, p);
         if (hit && hit.handle) {
+          canvas.setPointerCapture(evt.pointerId);
           drag = { mode: 'resize', handle: hit.handle, ann: hit.ann, start: p, orig: Object.assign({}, hit.ann) };
         } else if (hit) {
+          canvas.setPointerCapture(evt.pointerId);
           selection = { page: pageIndex, id: hit.ann.id };
           drag = {
             mode: 'move', ann: hit.ann, start: p,
@@ -289,17 +303,21 @@
           };
           notifySelection();
         } else {
+          // tapped empty page space — don't capture the pointer, so the
+          // browser is free to treat this gesture as a normal page scroll
           selection = null; notifySelection();
         }
         redraw(pageIndex);
         return;
       }
       if (state.tool === 'draw') {
+        canvas.setPointerCapture(evt.pointerId);
         drag = { mode: 'draw', points: [p] };
         addAnnotation(pageIndex, { type: 'draw', color: state.color, strokeWidth: state.strokeWidth, points: drag.points });
         return;
       }
       if (['rect', 'ellipse', 'line', 'arrow'].includes(state.tool)) {
+        canvas.setPointerCapture(evt.pointerId);
         const type = state.tool;
         if (type === 'line' || type === 'arrow') {
           drag = { mode: 'shape', type, ann: addAnnotation(pageIndex, { type, color: state.color, strokeWidth: state.strokeWidth, points: [p, p] }) };
@@ -358,7 +376,7 @@
 
     // text-layer selection -> highlight/underline/strike
     if (surf.textLayerEl) {
-      surf.textLayerEl.addEventListener('mouseup', () => {
+      const applySelectionAsAnnotation = () => {
         if (!['highlight', 'underline', 'strike'].includes(state.tool)) return;
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
@@ -377,7 +395,9 @@
         });
         sel.removeAllRanges();
         redraw(pageIndex);
-      });
+      };
+      surf.textLayerEl.addEventListener('mouseup', applySelectionAsAnnotation);
+      surf.textLayerEl.addEventListener('touchend', applySelectionAsAnnotation);
     }
   }
 
@@ -680,6 +700,7 @@
     });
     el.querySelectorAll('[data-tool]').forEach((btn) => btn.onclick = () => {
       state.tool = btn.dataset.tool; state.stampArm = null;
+      updateInteractivity();
       if (state.tool === 'image') { el.querySelector('#imageFileInput').click(); state.tool = 'select'; }
       renderAnnotatePanel(el);
     });
@@ -715,7 +736,7 @@
       const b = document.createElement('button');
       b.className = 'tool-card' + (state.stampArm && state.stampArm.id === s.id ? ' active' : '');
       b.innerHTML = `<span style="font-family:var(--font-mono);font-weight:700;color:${s.color};font-size:11px;">${s.label}</span>`;
-      b.onclick = () => { state.stampArm = s; state.tool = 'select'; window.PTApp.toast('Click a page to place the ' + s.label + ' stamp', 'info'); };
+      b.onclick = () => { state.stampArm = s; state.tool = 'select'; updateInteractivity(); window.PTApp.toast('Click a page to place the ' + s.label + ' stamp', 'info'); };
       grid.appendChild(b);
     });
     el.querySelector('#btnNewSig').onclick = () => window.PTApp.openSignatureModal((dataUrl, label) => {
@@ -759,7 +780,7 @@
   }
 
   window.PTAnnotate = {
-    setTool: (t) => { state.tool = t; state.stampArm = null; },
+    setTool: (t) => { state.tool = t; state.stampArm = null; updateInteractivity(); },
     getTool: () => state.tool,
     getState: () => state,
     getAll, setAll, pageAnns, addAnnotation, removeAnnotation, updateAnnotation,

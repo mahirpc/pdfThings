@@ -500,6 +500,7 @@
         block.dataset.sized = '1';
       }
     }
+    updateCurrentPageFromScroll();
   }
 
   function currentScaleFor(nativeWidth) {
@@ -515,14 +516,46 @@
   function onPageIntersect(entries) {
     entries.forEach((entry) => {
       const idx = Number(entry.target.dataset.index);
-      if (entry.isIntersecting) { renderPageBlock(idx); trackCurrentPage(idx); }
+      if (entry.isIntersecting) { renderPageBlock(idx); }
       else releasePageBlock(idx);
     });
   }
 
-  function trackCurrentPage(idx) {
-    // only update "current page" when it's the most visible one
+  /** The render/virtualization observer above uses a large rootMargin (to
+   *  pre-render pages just outside the viewport), so several pages count
+   *  as "intersecting" at once — not a reliable signal for which page the
+   *  person is actually looking at. Track that separately from real
+   *  scroll position instead, throttled to one check per frame. */
+  let scrollRaf = null;
+  function onViewportScroll() {
+    if (scrollRaf) return;
+    scrollRaf = requestAnimationFrame(() => { scrollRaf = null; updateCurrentPageFromScroll(); });
+  }
+  function updateCurrentPageFromScroll() {
+    if (!state.numPages) return;
+    const vpRect = el.viewport.getBoundingClientRect();
+    const targetY = vpRect.top + vpRect.height * 0.35;
+    let best = null, bestDist = Infinity;
+    el.pageScroller.querySelectorAll('.page-block').forEach((block) => {
+      const r = block.getBoundingClientRect();
+      if (r.bottom < vpRect.top || r.top > vpRect.bottom) return;
+      const dist = Math.abs((r.top + r.height / 2) - targetY);
+      if (dist < bestDist) { bestDist = dist; best = block; }
+    });
+    if (best) setCurrentPageIndex(Number(best.dataset.index));
+  }
+
+  /** Single place that updates which page is "current" — drives the
+   *  thumbnail highlight, the outline drawn around the active page in the
+   *  main view, and which page toolbar actions like Rotate apply to. */
+  function setCurrentPageIndex(idx) {
+    const changed = idx !== state.currentPageIndex;
     state.currentPageIndex = idx;
+    PTThumbs.setCurrent(idx);
+    el.pageScroller.querySelectorAll('.page-block.current-page').forEach((b) => b.classList.remove('current-page'));
+    const block = el.pageScroller.querySelector(`.page-block[data-index="${idx}"]`);
+    if (block) block.classList.add('current-page');
+    if (changed && state.activePanel === 'view') renderPanel('view');
   }
 
   async function renderPageBlock(idx) {
@@ -610,8 +643,7 @@
       block.parentElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (flash) { block.style.outline = '3px solid #d69e2e'; setTimeout(() => (block.style.outline = ''), 900); }
     }
-    state.currentPageIndex = idx;
-    PTThumbs.setCurrent(idx);
+    setCurrentPageIndex(idx);
   }
 
   /* ---------------- structural change / history ---------------- */
@@ -939,6 +971,7 @@
   $('#btnCollapseThumbs').onclick = () => el.appBody.classList.toggle('thumbs-collapsed');
 
   window.addEventListener('resize', debounce(() => { if (state.fitWidth) rerenderVisiblePages(); }, 200));
+  el.viewport.addEventListener('scroll', onViewportScroll, { passive: true });
 
   document.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
