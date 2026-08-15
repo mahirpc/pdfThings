@@ -81,7 +81,14 @@ and its core libraries.
 - **Security & metadata** — edit title/author/subject/keywords; password-
   protect with AES encryption and permission flags (printing, copying,
   editing, annotating); remove a password; flatten annotations
-  permanently; re-save/compress.
+  permanently.
+- **Compress on save** — every Save prompts for a compression level (No
+  compression / Low / Medium / High, or a 0–100% slider). Anything above
+  "No compression" re-renders each page as a JPEG at a level-derived
+  resolution/quality and rebuilds the PDF from those images, which works
+  on any PDF regardless of what's inside it — but means the saved copy's
+  text is no longer selectable or searchable (your working copy in the
+  editor is unaffected). The save toast reports the before/after size.
 - **Everything stays local** — signatures, recent-files list, and settings
   live in this browser's IndexedDB. Nothing is ever sent anywhere.
 

@@ -78,7 +78,7 @@
     el.modalRoot.appendChild(backdrop);
     function close() { backdrop.remove(); if (onClose) onClose(); }
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-    backdrop.querySelector('[data-close]').onclick = close;
+    backdrop.querySelectorAll('[data-close]').forEach((b) => b.onclick = close);
     const card = backdrop.querySelector('.modal-card');
     if (onMount) onMount(card, close);
     return { close, card };
@@ -298,10 +298,10 @@
         <div class="field"><input type="password" id="removePwd" placeholder="Current password"></div>
         <button class="btn btn-block" id="btnRemovePwd">Remove password</button>
         <hr class="hr">
-        <div class="section-title">Flatten &amp; compress</div>
+        <div class="section-title">Flatten &amp; tidy</div>
         <button class="btn btn-block" id="btnFlatten">Flatten annotations now</button>
-        <button class="btn btn-block" id="btnCompress">Re-save / compress</button>
-        <p class="hint">Re-save reduces overhead where possible; a static in-browser tool can't match a dedicated image-recompression pipeline, so gains vary by file.</p>
+        <button class="btn btn-block" id="btnCompress">Re-save (tidy structure)</button>
+        <p class="hint">Cleans up internal overhead without changing image quality. For real file-size reduction, use the compression options in the Save dialog instead.</p>
       `;
       body.querySelector('#btnSaveMeta').onclick = async () => {
         const out = await PTTools.setMetadata(state.workingBytes, {
@@ -346,7 +346,7 @@
       body.querySelector('#btnCompress').onclick = async () => {
         const doc = await PTTools.loadDoc(state.workingBytes);
         const out = await PTTools.saveDoc(doc);
-        await applyStructuralChange(out, 'Re-save / compress');
+        await applyStructuralChange(out, 'Re-save (tidy structure)');
         toast('Re-saved', 'success');
       };
     });
@@ -755,9 +755,18 @@
   }
 
   async function exportPdf() {
+    const choice = await openCompressionModal();
+    if (!choice) return; // cancelled — save aborted, nothing touched
     el.btnSave.disabled = true;
     try {
-      const finalBytes = await PTTools.bakeAnnotations(state.workingBytes, PTAnnotate.getAll());
+      let finalBytes = await PTTools.bakeAnnotations(state.workingBytes, PTAnnotate.getAll());
+      const beforeSize = finalBytes.length;
+      if (!choice.skip) {
+        toast('Compressing…', 'info');
+        finalBytes = await PTTools.compressPdf(finalBytes, choice.pct, (i, n) => {
+          if (n > 6 && i % 3 === 0) toast(`Compressing page ${i} of ${n}…`, 'info');
+        });
+      }
       const name = state.fileName || 'document.pdf';
       if (window.showSaveFilePicker) {
         try {
@@ -766,7 +775,7 @@
           await writable.write(finalBytes);
           await writable.close();
           state.dirty = false; updateDirty();
-          toast('Saved', 'success');
+          toast(saveToast('Saved', beforeSize, finalBytes.length, choice.skip), 'success');
           el.btnSave.disabled = false;
           return;
         } catch (e) {
@@ -776,13 +785,87 @@
       }
       await downloadBytes(finalBytes, name);
       state.dirty = false; updateDirty();
-      toast('Downloaded', 'success');
+      toast(saveToast('Downloaded', beforeSize, finalBytes.length, choice.skip), 'success');
     } catch (e) {
       console.error(e);
       toast('Could not save: ' + e.message, 'error');
     } finally {
       el.btnSave.disabled = false;
     }
+  }
+
+  function saveToast(verb, before, after, skipped) {
+    if (skipped) return verb;
+    const pct = before > 0 ? Math.round((1 - after / before) * 100) : 0;
+    return `${verb} — ${formatKb(before)} → ${formatKb(after)}${pct > 0 ? ` (${pct}% smaller)` : ''}`;
+  }
+  function formatKb(bytes) {
+    return bytes >= 1024 * 1024 ? (bytes / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+  }
+
+  const COMPRESSION_PRESETS = { low: 15, medium: 50, high: 85 };
+
+  /** Resolves to { skip, pct } once the person picks a level and confirms,
+   *  or to null if they cancel — exportPdf treats null as "don't save". */
+  function openCompressionModal() {
+    return new Promise((resolve) => {
+      PTDB.get('settings', 'compressionPref').then((saved) => {
+        const pref = saved || { skip: true, pct: COMPRESSION_PRESETS.medium };
+        let settled = false;
+
+        const { card, close } = openModal({
+          title: 'Save & compress',
+          bodyHtml: `
+            <p class="hint">Compression re-renders each page as an image to shrink the file, so text in the saved copy is no longer selectable or searchable — your document here in the editor is unaffected either way.</p>
+            <div class="chip-row" id="compChips">
+              <button class="chip" data-level="none">No compression</button>
+              <button class="chip" data-level="low">Low</button>
+              <button class="chip" data-level="medium">Medium</button>
+              <button class="chip" data-level="high">High</button>
+            </div>
+            <div class="field" style="margin-top:14px;">
+              <label>Compression amount <span id="compPctLabel">0%</span></label>
+              <input type="range" id="compSlider" min="0" max="100" value="${pref.pct}">
+            </div>
+            <p class="hint" id="compSliderHint"></p>
+          `,
+          footHtml: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="compConfirm">Save PDF</button>`,
+          onClose: () => { if (!settled) resolve(null); },
+        });
+
+        const chips = card.querySelectorAll('#compChips .chip');
+        const slider = card.querySelector('#compSlider');
+        const pctLabel = card.querySelector('#compPctLabel');
+        const sliderHint = card.querySelector('#compSliderHint');
+
+        function setLevel(level) {
+          chips.forEach((c) => c.classList.toggle('active', c.dataset.level === level));
+          const skip = level === 'none';
+          slider.disabled = skip;
+          if (level !== 'custom' && COMPRESSION_PRESETS[level]) slider.value = COMPRESSION_PRESETS[level];
+          pctLabel.textContent = skip ? '—' : slider.value + '%';
+          sliderHint.textContent = skip
+            ? 'Saved exactly as edited — full quality, smallest possible compatibility risk.'
+            : 'Higher = smaller file, softer text. Try Medium first if unsure.';
+        }
+        chips.forEach((chip) => chip.onclick = () => setLevel(chip.dataset.level));
+        slider.oninput = () => {
+          pctLabel.textContent = slider.value + '%';
+          const matched = Object.entries(COMPRESSION_PRESETS).find(([, v]) => String(v) === slider.value);
+          chips.forEach((c) => c.classList.toggle('active', matched ? c.dataset.level === matched[0] : false));
+        };
+        setLevel(pref.skip ? 'none' : (Object.entries(COMPRESSION_PRESETS).find(([, v]) => v === pref.pct)?.[0] || 'custom'));
+
+        card.querySelector('#compConfirm').onclick = () => {
+          const skip = slider.disabled;
+          const result = { skip, pct: Number(slider.value) };
+          PTDB.set('settings', 'compressionPref', result);
+          settled = true;
+          close();
+          resolve(result);
+        };
+      });
+    });
   }
 
   /* ---------------- recent files ---------------- */
