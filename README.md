@@ -64,6 +64,13 @@ and its core libraries.
   sequential, never `Promise.all`, to bound memory); split into ranges or
   one-file-per-page; insert blank pages or pages from another PDF;
   watermarks; page numbers / running headers.
+- **Scan** — build a PDF from photos of pages (upload from your library or
+  capture with the camera). Each photo gets its own freeform crop (drag
+  the corner handles), rotate, and brightness/contrast/grayscale
+  adjustment before the pages are assembled, in order, into a new PDF —
+  which can open straight in the editor or download directly. Source
+  photos are downscaled on import to keep a multi-page scanning session
+  light on memory.
 - **OCR** — fully offline via Tesseract.js (WebAssembly), loaded only when
   you open the OCR panel. Can also bake an invisible, position-matched
   text layer onto a scanned page so it becomes selectable/searchable
@@ -85,6 +92,7 @@ and its core libraries.
 | `js/app.js` | Document state, virtualized page rendering, panel routing, undo/redo, save/export, PWA install |
 | `js/pdf-tools.js` | All pdf-lib structural operations (merge/split/rotate/encrypt/etc.) |
 | `js/annotate.js` | The annotation overlay engine + signature pad + the bake-into-PDF routine |
+| `js/scan.js` | Scan panel — photo crop/rotate/adjust and PDF assembly from images |
 | `js/forms.js` | AcroForm field detection and filling |
 | `js/ocr.js` | Tesseract.js integration |
 | `js/ai.js` | The on-device text heuristics |
