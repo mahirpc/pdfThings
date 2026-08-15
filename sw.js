@@ -7,7 +7,7 @@
  * here — it's several MB and most sessions never touch OCR, so it's
  * fetched (and then opportunistically cached) only when first used.
  */
-const CACHE_VERSION = 'pdfthings-v2';
+const CACHE_VERSION = 'pdfthings-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const APP_SHELL = [
   './js/db.js',
   './js/pdf-tools.js',
   './js/annotate.js',
+  './js/scan.js',
   './js/forms.js',
   './js/ocr.js',
   './js/ai.js',
