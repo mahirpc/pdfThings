@@ -374,7 +374,7 @@
 
   /** items: [{ dataUrl (JPEG), widthPt, heightPt }], already cropped and
    *  filtered by scan.js — this just embeds each as a full-bleed page. */
-  async function createPdfFromImages(items, onProgress) {
+  async function createPdfFromImages(items, onProgress, meta) {
     const doc = await PDFDocument.create();
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
@@ -386,8 +386,56 @@
       if (onProgress) onProgress(i + 1, items.length);
     }
     doc.setProducer('pdfThings');
-    doc.setCreator('pdfThings — Scan');
+    doc.setCreator((meta && meta.creator) || 'pdfThings — Scan');
     return saveDoc(doc);
+  }
+
+  /* ---------------- Save-time compression ---------------- */
+
+  /** Re-renders every page as a JPEG at a quality/resolution derived from
+   *  `pct` (0 = lightest, 100 = smallest file) and rebuilds the PDF from
+   *  those images via createPdfFromImages, preserving each page's
+   *  original physical size and rotation. This works on ANY PDF
+   *  regardless of what's inside it (vector text, photos, whatever pdf.js
+   *  can render) because it never touches the original internal
+   *  structure — it just repaints each page and starts fresh. The real
+   *  trade-off, which the UI must say plainly: the saved copy's text is
+   *  no longer selectable/searchable, since every page becomes a single
+   *  image. Pass pct <= 0 to skip this entirely (the caller should just
+   *  save the bytes unchanged in that case). */
+  function settingsForCompressionPct(pct) {
+    const p = Math.max(0, Math.min(100, pct)) / 100;
+    const dpi = Math.round(220 - (220 - 72) * p);
+    const quality = +(0.9 - (0.9 - 0.3) * p).toFixed(2);
+    return { dpi, quality };
+  }
+
+  async function compressPdf(bytes, pct, onProgress) {
+    const { dpi, quality } = settingsForCompressionPct(pct);
+    const pdfjsDoc = await pdfjsLib.getDocument({ data: clone(bytes) }).promise;
+    try {
+      const items = [];
+      for (let i = 1; i <= pdfjsDoc.numPages; i++) {
+        const page = await pdfjsDoc.getPage(i);
+        const rotation = page.rotate || 0;
+        const basePt = page.getViewport({ scale: 1, rotation }); // page size in PDF points, rotation-aware
+        const scale = dpi / 72;
+        const renderVp = page.getViewport({ scale, rotation });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(renderVp.width));
+        canvas.height = Math.max(1, Math.round(renderVp.height));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // JPEG has no alpha
+        await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        canvas.width = 0; canvas.height = 0; // release the pixel buffer promptly
+        items.push({ dataUrl, widthPt: basePt.width, heightPt: basePt.height });
+        if (onProgress) onProgress(i, pdfjsDoc.numPages);
+      }
+      return createPdfFromImages(items, null, { creator: 'pdfThings — compressed on save' });
+    } finally {
+      pdfjsDoc.destroy();
+    }
   }
 
   window.PTTools = {
@@ -401,6 +449,7 @@
     addInvisibleTextLayer,
     bakeAnnotations,
     createPdfFromImages,
+    compressPdf, settingsForCompressionPct,
     hexToRgb01,
   };
 })();
