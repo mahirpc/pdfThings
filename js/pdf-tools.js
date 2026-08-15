@@ -370,6 +370,26 @@
     return saveDoc(doc);
   }
 
+  /* ---------------- Image → PDF (Scan panel) ---------------- */
+
+  /** items: [{ dataUrl (JPEG), widthPt, heightPt }], already cropped and
+   *  filtered by scan.js — this just embeds each as a full-bleed page. */
+  async function createPdfFromImages(items, onProgress) {
+    const doc = await PDFDocument.create();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const res = await fetch(it.dataUrl);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const img = await doc.embedJpg(bytes);
+      const page = doc.addPage([it.widthPt, it.heightPt]);
+      page.drawImage(img, { x: 0, y: 0, width: it.widthPt, height: it.heightPt });
+      if (onProgress) onProgress(i + 1, items.length);
+    }
+    doc.setProducer('pdfThings');
+    doc.setCreator('pdfThings — Scan');
+    return saveDoc(doc);
+  }
+
   window.PTTools = {
     clone, loadDoc, saveDoc, getPageCount,
     reorderPages, deletePages, duplicatePage, extractPages, rotatePage, insertBlankPage,
@@ -380,6 +400,7 @@
     getFormFieldDescriptors, fillForm, flattenForms,
     addInvisibleTextLayer,
     bakeAnnotations,
+    createPdfFromImages,
     hexToRgb01,
   };
 })();

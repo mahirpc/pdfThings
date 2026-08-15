@@ -55,7 +55,7 @@
     floatingToolbar: $('#floatingToolbar'),
   };
 
-  const PANEL_TITLES = { view: 'View', pages: 'Pages', annotate: 'Annotate', stamps: 'Sign', forms: 'Forms', ocr: 'OCR', ai: 'Text tools', security: 'Security', settings: 'Settings' };
+  const PANEL_TITLES = { view: 'View', pages: 'Pages', scan: 'Scan', annotate: 'Annotate', stamps: 'Sign', forms: 'Forms', ocr: 'OCR', ai: 'Text tools', security: 'Security', settings: 'Settings' };
 
   /* ================= toast ================= */
   function toast(msg, kind) {
@@ -105,6 +105,7 @@
     const body = el.ctxBody;
     if (name === 'view') return renderViewPanel(body);
     if (name === 'pages') return renderPagesPanel(body);
+    if (name === 'scan') return PTScan.renderPanel(body);
     if (name === 'annotate') return PTAnnotate.renderAnnotatePanel(body);
     if (name === 'stamps') return PTAnnotate.renderStampsPanel(body);
     if (name === 'forms') return PTForms.renderPanel(body);
@@ -829,6 +830,15 @@
     loadDocument(bytes, file.name, handle);
   }
 
+  /** Lets a tool panel (e.g. Scan) hand pdfThings a freshly-built PDF and
+   *  have it become the working document, same unsaved-changes courtesy
+   *  as opening a file from disk. */
+  async function openBytesAsDocument(bytes, name) {
+    if (state.dirty && !confirm('You have unsaved changes in the current document. Open the new PDF anyway?')) return false;
+    await loadDocument(bytes, name);
+    return true;
+  }
+
   document.getElementById('btnOpenFile').onclick = async () => {
     if (window.showOpenFilePicker) {
       try {
@@ -1006,5 +1016,6 @@
     getCurrentPageIndex: () => state.currentPageIndex,
     applyStructuralChange,
     openSignatureModal,
+    openBytesAsDocument,
   };
 })();
