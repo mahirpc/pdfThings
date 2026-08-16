@@ -372,8 +372,12 @@
 
   /* ---------------- Image → PDF (Scan panel) ---------------- */
 
-  /** items: [{ dataUrl (JPEG), widthPt, heightPt }], already cropped and
-   *  filtered by scan.js — this just embeds each as a full-bleed page. */
+  /** items: [{ dataUrl (JPEG), widthPt, heightPt, fitTo? }], already
+   *  cropped/filtered by scan.js (or rendered by compressPdf below).
+   *  Normally each image becomes a full-bleed page at its own size; if an
+   *  item has `fitTo: {width, height}`, the page is created at that fixed
+   *  size instead, filled white, and the image is scaled to fit inside it
+   *  (preserving aspect ratio, centered) rather than stretched. */
   async function createPdfFromImages(items, onProgress, meta) {
     const doc = await PDFDocument.create();
     for (let i = 0; i < items.length; i++) {
@@ -381,8 +385,17 @@
       const res = await fetch(it.dataUrl);
       const bytes = new Uint8Array(await res.arrayBuffer());
       const img = await doc.embedJpg(bytes);
-      const page = doc.addPage([it.widthPt, it.heightPt]);
-      page.drawImage(img, { x: 0, y: 0, width: it.widthPt, height: it.heightPt });
+      if (it.fitTo) {
+        const { width: pw, height: ph } = it.fitTo;
+        const page = doc.addPage([pw, ph]);
+        page.drawRectangle({ x: 0, y: 0, width: pw, height: ph, color: rgb(1, 1, 1) });
+        const scale = Math.min(pw / it.widthPt, ph / it.heightPt);
+        const w = it.widthPt * scale, h = it.heightPt * scale;
+        page.drawImage(img, { x: (pw - w) / 2, y: (ph - h) / 2, width: w, height: h });
+      } else {
+        const page = doc.addPage([it.widthPt, it.heightPt]);
+        page.drawImage(img, { x: 0, y: 0, width: it.widthPt, height: it.heightPt });
+      }
       if (onProgress) onProgress(i + 1, items.length);
     }
     doc.setProducer('pdfThings');
@@ -390,19 +403,24 @@
     return saveDoc(doc);
   }
 
-  /* ---------------- Save-time compression ---------------- */
+  /* ---------------- Save-time compression & page-size fix ---------------- */
 
   /** Re-renders every page as a JPEG at a quality/resolution derived from
    *  `pct` (0 = lightest, 100 = smallest file) and rebuilds the PDF from
-   *  those images via createPdfFromImages, preserving each page's
-   *  original physical size and rotation. This works on ANY PDF
+   *  those images via createPdfFromImages. This works on ANY PDF
    *  regardless of what's inside it (vector text, photos, whatever pdf.js
    *  can render) because it never touches the original internal
    *  structure — it just repaints each page and starts fresh. The real
    *  trade-off, which the UI must say plainly: the saved copy's text is
    *  no longer selectable/searchable, since every page becomes a single
-   *  image. Pass pct <= 0 to skip this entirely (the caller should just
-   *  save the bytes unchanged in that case). */
+   *  image.
+   *
+   *  targetPt, if given ({width,height} in PDF points), forces every
+   *  output page to that one fixed size — each rendered page is scaled to
+   *  fit inside it and centered on a white background, rather than each
+   *  page keeping its own original size. Pass targetPt as null/undefined
+   *  to keep each page's own size (the original compression-only
+   *  behavior). */
   function settingsForCompressionPct(pct) {
     const p = Math.max(0, Math.min(100, pct)) / 100;
     const dpi = Math.round(220 - (220 - 72) * p);
@@ -410,7 +428,12 @@
     return { dpi, quality };
   }
 
-  async function compressPdf(bytes, pct, onProgress) {
+  const STANDARD_PAGE_SIZES = {
+    a4: { width: 595, height: 842 },
+    letter: { width: 612, height: 792 },
+  };
+
+  async function compressPdf(bytes, pct, targetPt, onProgress) {
     const { dpi, quality } = settingsForCompressionPct(pct);
     const pdfjsDoc = await pdfjsLib.getDocument({ data: clone(bytes) }).promise;
     try {
@@ -429,13 +452,30 @@
         await page.render({ canvasContext: ctx, viewport: renderVp }).promise;
         const dataUrl = canvas.toDataURL('image/jpeg', quality);
         canvas.width = 0; canvas.height = 0; // release the pixel buffer promptly
-        items.push({ dataUrl, widthPt: basePt.width, heightPt: basePt.height });
+        const item = { dataUrl, widthPt: basePt.width, heightPt: basePt.height };
+        if (targetPt) item.fitTo = targetPt;
+        items.push(item);
         if (onProgress) onProgress(i, pdfjsDoc.numPages);
       }
-      return createPdfFromImages(items, null, { creator: 'pdfThings — compressed on save' });
+      return createPdfFromImages(items, null, { creator: 'pdfThings — saved with pdfThings' });
     } finally {
       pdfjsDoc.destroy();
     }
+  }
+
+  /** Scans a live pdf.js document (no rendering, just page geometry) and
+   *  reports the smallest/largest width and height found — independently
+   *  per axis, not "the smallest page" as a single unit — so the Save
+   *  dialog can show the range and offer "match smallest/largest". */
+  async function getPageSizeRange(pdfjsDoc) {
+    let minW = Infinity, minH = Infinity, maxW = 0, maxH = 0;
+    for (let i = 1; i <= pdfjsDoc.numPages; i++) {
+      const page = await pdfjsDoc.getPage(i);
+      const vp = page.getViewport({ scale: 1, rotation: page.rotate || 0 });
+      minW = Math.min(minW, vp.width); maxW = Math.max(maxW, vp.width);
+      minH = Math.min(minH, vp.height); maxH = Math.max(maxH, vp.height);
+    }
+    return { minW, minH, maxW, maxH, pageCount: pdfjsDoc.numPages };
   }
 
   window.PTTools = {
@@ -450,6 +490,7 @@
     bakeAnnotations,
     createPdfFromImages,
     compressPdf, settingsForCompressionPct,
+    getPageSizeRange, STANDARD_PAGE_SIZES,
     hexToRgb01,
   };
 })();

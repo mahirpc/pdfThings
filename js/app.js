@@ -755,16 +755,24 @@
   }
 
   async function exportPdf() {
-    const choice = await openCompressionModal();
+    const choice = await openSaveOptionsModal();
     if (!choice) return; // cancelled — save aborted, nothing touched
     el.btnSave.disabled = true;
     try {
       let finalBytes = await PTTools.bakeAnnotations(state.workingBytes, PTAnnotate.getAll());
       const beforeSize = finalBytes.length;
-      if (!choice.skip) {
-        toast('Compressing…', 'info');
-        finalBytes = await PTTools.compressPdf(finalBytes, choice.pct, (i, n) => {
-          if (n > 6 && i % 3 === 0) toast(`Compressing page ${i} of ${n}…`, 'info');
+      const needsRaster = !choice.compression.skip || choice.pageSize.enabled;
+      if (needsRaster) {
+        toast(choice.pageSize.enabled ? 'Adjusting page size…' : 'Compressing…', 'info');
+        // If only the page size is being fixed (compression left at "No
+        // compression"), pct 0 still renders — that's unavoidable once
+        // pages must be repainted onto a new fixed size — but pct 0 maps
+        // to this app's highest-quality rendering settings, so the loss
+        // versus the vector original is minimal.
+        const pct = choice.compression.skip ? 0 : choice.compression.pct;
+        const targetPt = choice.pageSize.enabled ? { width: choice.pageSize.widthPt, height: choice.pageSize.heightPt } : null;
+        finalBytes = await PTTools.compressPdf(finalBytes, pct, targetPt, (i, n) => {
+          if (n > 6 && i % 3 === 0) toast(`Processing page ${i} of ${n}…`, 'info');
         });
       }
       const name = state.fileName || 'document.pdf';
@@ -775,7 +783,7 @@
           await writable.write(finalBytes);
           await writable.close();
           state.dirty = false; updateDirty();
-          toast(saveToast('Saved', beforeSize, finalBytes.length, choice.skip), 'success');
+          toast(saveToast('Saved', beforeSize, finalBytes.length, !needsRaster), 'success');
           el.btnSave.disabled = false;
           return;
         } catch (e) {
@@ -785,7 +793,7 @@
       }
       await downloadBytes(finalBytes, name);
       state.dirty = false; updateDirty();
-      toast(saveToast('Downloaded', beforeSize, finalBytes.length, choice.skip), 'success');
+      toast(saveToast('Downloaded', beforeSize, finalBytes.length, !needsRaster), 'success');
     } catch (e) {
       console.error(e);
       toast('Could not save: ' + e.message, 'error');
@@ -802,21 +810,37 @@
   function formatKb(bytes) {
     return bytes >= 1024 * 1024 ? (bytes / (1024 * 1024)).toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
   }
+  function ptToIn(pt) { return pt / 72; }
+  function inToPt(inches) { return inches * 72; }
+  function fmtIn(pt) { return ptToIn(pt).toFixed(1) + '\u2033'; } // 1.0″
 
   const COMPRESSION_PRESETS = { low: 15, medium: 50, high: 85 };
 
-  /** Resolves to { skip, pct } once the person picks a level and confirms,
-   *  or to null if they cancel — exportPdf treats null as "don't save". */
-  function openCompressionModal() {
+  /** Resolves to { compression: {skip, pct}, pageSize: {enabled, widthPt, heightPt} }
+   *  once the person confirms, or to null if they cancel. */
+  function openSaveOptionsModal() {
     return new Promise((resolve) => {
-      PTDB.get('settings', 'compressionPref').then((saved) => {
-        const pref = saved || { skip: true, pct: COMPRESSION_PRESETS.medium };
+      Promise.all([
+        PTDB.get('settings', 'compressionPref'),
+        PTDB.get('settings', 'pageSizePref'),
+        state.pdfjsDoc ? PTTools.getPageSizeRange(state.pdfjsDoc) : Promise.resolve(null),
+      ]).then(([savedComp, savedSize, range]) => {
+        const compPref = savedComp || { skip: true, pct: COMPRESSION_PRESETS.medium };
+        const sizePref = savedSize || { mode: 'keep', customW: 8.5, customH: 11 };
         let settled = false;
 
+        const uniform = range && Math.abs(range.maxW - range.minW) < 0.5 && Math.abs(range.maxH - range.minH) < 0.5;
+        const rangeText = !range
+          ? ''
+          : uniform
+            ? `Every page in this document is already the same size (${fmtIn(range.maxW)} × ${fmtIn(range.maxH)}).`
+            : `This document's pages range from ${fmtIn(range.minW)} × ${fmtIn(range.minH)} up to ${fmtIn(range.maxW)} × ${fmtIn(range.maxH)}.`;
+
         const { card, close } = openModal({
-          title: 'Save & compress',
+          title: 'Save options', wide: true,
           bodyHtml: `
-            <p class="hint">Compression re-renders each page as an image to shrink the file, so text in the saved copy is no longer selectable or searchable — your document here in the editor is unaffected either way.</p>
+            <div class="section-title">Compression</div>
+            <p class="hint">Re-renders each page as an image to shrink the file, so text in the saved copy is no longer selectable or searchable — your document here in the editor is unaffected either way.</p>
             <div class="chip-row" id="compChips">
               <button class="chip" data-level="none">No compression</button>
               <button class="chip" data-level="low">Low</button>
@@ -825,19 +849,38 @@
             </div>
             <div class="field" style="margin-top:14px;">
               <label>Compression amount <span id="compPctLabel">0%</span></label>
-              <input type="range" id="compSlider" min="0" max="100" value="${pref.pct}">
+              <input type="range" id="compSlider" min="0" max="100" value="${compPref.pct}">
             </div>
             <p class="hint" id="compSliderHint"></p>
+            <hr class="hr">
+            <div class="section-title">Page size</div>
+            <p class="hint">${rangeText || 'Open a document to see its page-size range.'}</p>
+            <div class="field">
+              <label>Make every page this size</label>
+              <select id="pageSizeMode">
+                <option value="keep">Keep each page's own size</option>
+                <option value="min" ${!range ? 'disabled' : ''}>Match this document's smallest page</option>
+                <option value="max" ${!range ? 'disabled' : ''}>Match this document's largest page</option>
+                <option value="a4">A4 (8.27″ × 11.69″)</option>
+                <option value="letter">US Letter (8.5″ × 11″)</option>
+                <option value="custom">Custom size…</option>
+              </select>
+            </div>
+            <div id="customSizeFields" style="display:flex;gap:10px;" hidden>
+              <div class="field"><label>Width (in)</label><input type="number" id="customW" min="1" max="60" step="0.1" value="${sizePref.customW}"></div>
+              <div class="field"><label>Height (in)</label><input type="number" id="customH" min="1" max="60" step="0.1" value="${sizePref.customH}"></div>
+            </div>
+            <p class="hint" id="pageSizeHint"></p>
           `,
           footHtml: `<button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="compConfirm">Save PDF</button>`,
           onClose: () => { if (!settled) resolve(null); },
         });
 
+        /* ---- compression controls (unchanged behavior) ---- */
         const chips = card.querySelectorAll('#compChips .chip');
         const slider = card.querySelector('#compSlider');
         const pctLabel = card.querySelector('#compPctLabel');
         const sliderHint = card.querySelector('#compSliderHint');
-
         function setLevel(level) {
           chips.forEach((c) => c.classList.toggle('active', c.dataset.level === level));
           const skip = level === 'none';
@@ -854,15 +897,49 @@
           const matched = Object.entries(COMPRESSION_PRESETS).find(([, v]) => String(v) === slider.value);
           chips.forEach((c) => c.classList.toggle('active', matched ? c.dataset.level === matched[0] : false));
         };
-        setLevel(pref.skip ? 'none' : (Object.entries(COMPRESSION_PRESETS).find(([, v]) => v === pref.pct)?.[0] || 'custom'));
+        setLevel(compPref.skip ? 'none' : (Object.entries(COMPRESSION_PRESETS).find(([, v]) => v === compPref.pct)?.[0] || 'custom'));
+
+        /* ---- page size controls ---- */
+        const sizeSel = card.querySelector('#pageSizeMode');
+        const customFields = card.querySelector('#customSizeFields');
+        const customWInput = card.querySelector('#customW');
+        const customHInput = card.querySelector('#customH');
+        const pageSizeHint = card.querySelector('#pageSizeHint');
+        sizeSel.value = range ? sizePref.mode : 'keep';
+        function updateSizeUi() {
+          const mode = sizeSel.value;
+          customFields.hidden = mode !== 'custom';
+          if (mode === 'keep') pageSizeHint.textContent = '';
+          else pageSizeHint.textContent = 'Every page is scaled to fit this size and centered, with any extra space filled white — nothing is stretched or distorted.';
+        }
+        sizeSel.onchange = updateSizeUi;
+        updateSizeUi();
+
+        function currentTargetPt() {
+          const mode = sizeSel.value;
+          if (mode === 'keep') return null;
+          if (mode === 'min' && range) return { width: range.minW, height: range.minH };
+          if (mode === 'max' && range) return { width: range.maxW, height: range.maxH };
+          if (mode === 'a4') return PTTools.STANDARD_PAGE_SIZES.a4;
+          if (mode === 'letter') return PTTools.STANDARD_PAGE_SIZES.letter;
+          if (mode === 'custom') {
+            const w = Math.max(1, +customWInput.value || sizePref.customW);
+            const h = Math.max(1, +customHInput.value || sizePref.customH);
+            return { width: inToPt(w), height: inToPt(h) };
+          }
+          return null;
+        }
 
         card.querySelector('#compConfirm').onclick = () => {
           const skip = slider.disabled;
-          const result = { skip, pct: Number(slider.value) };
-          PTDB.set('settings', 'compressionPref', result);
+          const compression = { skip, pct: Number(slider.value) };
+          const target = currentTargetPt();
+          const pageSize = { enabled: !!target, widthPt: target ? target.width : 0, heightPt: target ? target.height : 0 };
+          PTDB.set('settings', 'compressionPref', compression);
+          PTDB.set('settings', 'pageSizePref', { mode: sizeSel.value, customW: +customWInput.value || sizePref.customW, customH: +customHInput.value || sizePref.customH });
           settled = true;
           close();
-          resolve(result);
+          resolve({ compression, pageSize });
         };
       });
     });
