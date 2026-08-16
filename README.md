@@ -89,6 +89,17 @@ and its core libraries.
   on any PDF regardless of what's inside it — but means the saved copy's
   text is no longer selectable or searchable (your working copy in the
   editor is unaffected). The save toast reports the before/after size.
+- **Fix page size on save** — the same dialog shows the smallest and
+  largest page dimensions found in the current document (handy after
+  scanning photos of mixed sizes) and lets you make every page one
+  consistent size: match the smallest or largest page already in the
+  document, A4, US Letter, or a custom width/height. Each page is scaled
+  to fit and centered, with any leftover space filled white — nothing is
+  stretched or cropped. Choosing a page size always re-renders pages (the
+  same mechanism as compression) since resizing isn't possible without
+  repainting; if compression is left at "No compression" while only
+  fixing page size, pages still render, but at this app's highest-quality
+  settings to keep the loss minimal.
 - **Everything stays local** — signatures, recent-files list, and settings
   live in this browser's IndexedDB. Nothing is ever sent anywhere.
 

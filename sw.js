@@ -7,7 +7,7 @@
  * here — it's several MB and most sessions never touch OCR, so it's
  * fetched (and then opportunistically cached) only when first used.
  */
-const CACHE_VERSION = 'pdfthings-v4';
+const CACHE_VERSION = 'pdfthings-v5';
 const APP_SHELL = [
   './',
   './index.html',
