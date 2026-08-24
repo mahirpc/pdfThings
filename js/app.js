@@ -471,6 +471,15 @@
     if (state.pageObservers) state.pageObservers.disconnect();
     state.pageObservers = new IntersectionObserver(onPageIntersect, { root: el.viewport, rootMargin: '600px 0px', threshold: 0.01 });
     state.pageSizesAtScale1 = [];
+    // Every page-block element above was just destroyed and is about to be
+    // rebuilt from scratch (this runs after ANY structural change — rotate,
+    // insert, delete, page numbers, etc. — not just opening a new file).
+    // Both of these track state tied to the DOM elements that just got
+    // wiped, so they must be reset here too, or the render function below
+    // thinks pages are "already rendered" and skips drawing the new,
+    // actually-empty ones — the page area then just stays blank.
+    renderedPages.clear();
+    PTAnnotate.unregisterAllSurfaces();
 
     for (let i = 0; i < state.numPages; i++) {
       const block = document.createElement('div');
