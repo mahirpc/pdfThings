@@ -85,6 +85,13 @@
   function unregisterSurface(pageIndex) {
     delete surfaces[pageIndex];
   }
+  /** Used when the page-scroller DOM is rebuilt wholesale (any structural
+   *  change) rather than one page scrolling out at a time — every
+   *  existing surface's canvas is about to be/was just destroyed, so drop
+   *  all of them at once rather than leaving dangling references. */
+  function unregisterAllSurfaces() {
+    Object.keys(surfaces).forEach((k) => delete surfaces[k]);
+  }
 
   function redraw(pageIndex) {
     const surf = surfaces[pageIndex];
@@ -784,7 +791,7 @@
     getTool: () => state.tool,
     getState: () => state,
     getAll, setAll, pageAnns, addAnnotation, removeAnnotation, updateAnnotation,
-    registerSurface, unregisterSurface, redraw, hydrateImages,
+    registerSurface, unregisterSurface, unregisterAllSurfaces, redraw, hydrateImages,
     setOnChange, setOnSelectionChange, deleteSelected, clearSelection,
     placeImageOrSignature,
     listSavedSignatures, saveSignature, deleteSignature,
